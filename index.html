@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ISS Tracker</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      #map {
+        height: 100vh;
+        width: 100%;
+      }
+      .coords {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        background: #000000cc;
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 14px;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="coords" id="coords">Loading...</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const map = L.map('map').setView([0, 0], 2);
+      const marker = L.marker([0, 0]).addTo(map);
+      const coordsDiv = document.getElementById('coords');
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+      }).addTo(map);
+
+      async function updateISS() {
+        try {
+          const res = await fetch('https://isstracker-api.onrender.com/api/iss');
+          const data = await res.json();
+          const { latitude, longitude } = data.position;
+          marker.setLatLng([latitude, longitude]);
+          map.setView([latitude, longitude], map.getZoom());
+          coordsDiv.textContent = `Lat: ${latitude}, Lon: ${longitude}`;
+        } catch (err) {
+          coordsDiv.textContent = 'Failed to fetch data';
+        }
+      }
+
+      updateISS();
+      setInterval(updateISS, 5000);
+    </script>
+  </body>
+</html>
