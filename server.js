@@ -1,8 +1,12 @@
 const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Serve static files (index.html, etc.)
+app.use(express.static(path.join(__dirname)));
 
 app.get('/api/iss', async (req, res) => {
   try {
