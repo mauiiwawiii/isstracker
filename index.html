@@ -1,71 +1,125 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>ISS Tracker</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-    <style>
-      #map {
-        height: 100vh;
-        width: 100%;
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ISS Tracker - 2D & 3D</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- CesiumJS -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+  <style>
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+    #controls {
+      padding: 10px;
+      background: #333;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+    #map2d, #map3d {
+      width: 100%;
+      height: calc(100vh - 110px);
+      display: none;
+    }
+    #map2d.active, #map3d.active { display: block; }
+    #info {
+      background: #f5f5f5;
+      padding: 10px;
+      text-align: center;
+      font-size: 1.1em;
+      border-top: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="btn2d">2D Map</button>
+    <button id="btn3d">3D Globe</button>
+  </div>
+
+  <div id="map2d" class="active"></div>
+  <div id="map3d"></div>
+
+  <div id="info">
+    <span id="coords">Lat: ---, Lon: ---</span> | 
+    <span id="alt">Altitude: --- mi</span> | 
+    <span id="speed">Speed: --- mph</span>
+  </div>
+
+  <script>
+    const issIcon = L.icon({
+      iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
+      iconSize: [50, 32],
+      iconAnchor: [25, 16]
+    });
+
+    // 2D Map
+    const map2d = L.map('map2d').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map2d);
+
+    const marker2d = L.marker([0, 0], { icon: issIcon }).addTo(map2d);
+
+    // 3D Globe
+    window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/';
+    const viewer = new Cesium.Viewer('map3d', {
+      terrainProvider: Cesium.createWorldTerrain(),
+      imageryProvider: new Cesium.IonImageryProvider({ assetId: 3 }),
+      baseLayerPicker: false,
+      geocoder: false
+    });
+    const issEntity = viewer.entities.add({
+      name: "ISS",
+      position: Cesium.Cartesian3.fromDegrees(0, 0, 420000),
+      billboard: {
+        image: 'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
+        width: 50,
+        height: 50
       }
-      .coords {
-        position: absolute;
-        bottom: 10px;
-        left: 10px;
-        background: #000000cc;
-        color: #fff;
-        padding: 6px 10px;
-        border-radius: 4px;
-        font-family: monospace;
-        font-size: 14px;
-        z-index: 1000;
+    });
+
+    // UI elements
+    const coordsEl = document.getElementById('coords');
+    const altEl = document.getElementById('alt');
+    const speedEl = document.getElementById('speed');
+
+    async function updateISS() {
+      try {
+        const res = await fetch('/api/iss');
+        const data = await res.json();
+
+        const latitude = parseFloat(data.latitude).toFixed(2);
+        const longitude = parseFloat(data.longitude).toFixed(2);
+
+        coordsEl.textContent = `Lat: ${latitude}, Lon: ${longitude}`;
+        altEl.textContent = `Altitude: ${data.altitude_mi} mi`;
+        speedEl.textContent = `Speed: ${data.speed_mph} mph`;
+
+        // 2D update
+        marker2d.setLatLng([latitude, longitude]);
+
+        // 3D update
+        issEntity.position = Cesium.Cartesian3.fromDegrees(longitude, latitude, data.altitude_mi * 1609.34);
+      } catch (err) {
+        console.error('Error updating ISS:', err);
       }
-    </style>
-  </head>
-  <body>
-    <div id="map"></div>
-    <div class="coords" id="coords">Loading...</div>
+    }
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-      const map = L.map('map').setView([0, 0], 2);
+    setInterval(updateISS, 5000);
+    updateISS();
 
-      const issIcon = L.icon({
-        iconUrl:
-          'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
-        iconSize: [50, 32],
-        iconAnchor: [25, 16],
-      });
-
-      const marker = L.marker([0, 0], { icon: issIcon }).addTo(map);
-      marker.bindPopup('🛰️ International Space Station').openPopup();
-
-      const coordsDiv = document.getElementById('coords');
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18,
-      }).addTo(map);
-
-      async function updateISS() {
-        try {
-          const res = await fetch('/api/iss');
-          const data = await res.json();
-          const { latitude, longitude } = data.position;
-          marker.setLatLng([latitude, longitude]);
-          map.setView([latitude, longitude], map.getZoom());
-          coordsDiv.textContent = `Lat: ${latitude}, Lon: ${longitude}`;
-        } catch (err) {
-          coordsDiv.textContent = 'Failed to fetch data';
-        }
-      }
-
-      updateISS();
-      setInterval(updateISS, 5000);
-    </script>
-  </body>
-</html>
+    // Toggle logic
+    document.getElementById('btn2d').addEventListener('click', () => {
+      document.getElementById('map2d').classList.add('active');
+      document.getElementById('map3d').classList.remove('active');
+    });
+    document.getElementById('btn3d').addEventListener('click', () => {
+      document.getElementById('map3d').classList.add('active');
+      document.getElementById('map2d').classList.remove('active');
+      viewer.resize();
