@@ -17,7 +17,9 @@ app.get('/api/iss', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch ISS data' });
   }
 });
-
+app.get('/health', (req, res) => {
+res.type('text').send('ok');
+});
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
