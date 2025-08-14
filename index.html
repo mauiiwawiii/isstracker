@@ -1,125 +1,214 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ISS Tracker - 2D & 3D</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <title>ISS Tracker — 2D & 3D</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- CesiumJS -->
+  <!-- CesiumJS (no token) -->
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
-  <link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet"/>
 
   <style>
-    body { margin: 0; padding: 0; font-family: sans-serif; }
-    #controls {
-      padding: 10px;
-      background: #333;
-      color: #fff;
-      display: flex;
-      justify-content: center;
-      gap: 10px;
+    :root { --bg:#0e0e0e; --bar:#1c1c1c; --text:#eee; --panel:#1f1f1f; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Arial,sans-serif}
+    #topbar{position:sticky;top:0;z-index:5;display:flex;gap:.5rem;justify-content:center;align-items:center;padding:.75rem;background:var(--bar);border-bottom:1px solid #000}
+    .btn{padding:.5rem .9rem;border-radius:.6rem;border:1px solid #444;background:#2c2c2c;color:#fff;cursor:pointer;transition:background .2s}
+    .btn:hover{background:#3d3d3d}
+    #mapWrap{position:relative}
+    #map2d,#map3d{width:100%;height:calc(100vh - 150px);display:none}
+    #map2d.active,#map3d.active{display:block}
+    #centerBtn{
+      position:absolute; right:16px; bottom:16px; top:auto; z-index:20;
     }
-    #map2d, #map3d {
-      width: 100%;
-      height: calc(100vh - 110px);
-      display: none;
-    }
-    #map2d.active, #map3d.active { display: block; }
-    #info {
-      background: #f5f5f5;
-      padding: 10px;
-      text-align: center;
-      font-size: 1.1em;
-      border-top: 1px solid #ccc;
-    }
+    #info{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;align-items:center;padding:.75rem;background:var(--panel);color:#fff;border-top:1px solid #333}
+    #info span{min-width:max(180px,fit-content)}
+    #status{font-size:.9rem;color:#9aa0a6;margin-left:.5rem}
   </style>
 </head>
 <body>
-  <div id="controls">
-    <button id="btn2d">2D Map</button>
-    <button id="btn3d">3D Globe</button>
+  <div id="topbar">
+    <button id="btn2d" class="btn">2D Map</button>
+    <button id="btn3d" class="btn">3D Globe</button>
+    <button id="followBtn" class="btn">Auto-Follow: On</button>
+    <span id="status"></span>
   </div>
 
-  <div id="map2d" class="active"></div>
-  <div id="map3d"></div>
+  <div id="mapWrap">
+    <button id="centerBtn" class="btn">Center on ISS</button>
+    <div id="map2d" class="active"></div>
+    <div id="map3d"></div>
+  </div>
 
   <div id="info">
-    <span id="coords">Lat: ---, Lon: ---</span> | 
-    <span id="alt">Altitude: --- mi</span> | 
+    <span id="coords">Lat: ---, Lon: ---</span>
+    <span id="alt">Altitude: --- mi</span>
     <span id="speed">Speed: --- mph</span>
   </div>
 
   <script>
+    // ---------- 2D (Leaflet) ----------
     const issIcon = L.icon({
-      iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
-      iconSize: [50, 32],
-      iconAnchor: [25, 16]
+      iconUrl:'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
+      iconSize:[38,24], iconAnchor:[19,12]
+    });
+    const map2d = L.map('map2d', { worldCopyJump:true }).setView([0,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap' }).addTo(map2d);
+    const marker2d = L.marker([0,0],{icon:issIcon}).addTo(map2d);
+    const trail2d = L.polyline([], { color:'#ff6b00', weight:2, opacity:0.85 }).addTo(map2d);
+    window.addEventListener('load', () => setTimeout(() => map2d.invalidateSize(), 100));
+
+    // ---------- 3D (Cesium) ----------
+    window.CESIUM_BASE_URL='https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/';
+    const viewer = new Cesium.Viewer('map3d',{
+      terrainProvider: new Cesium.EllipsoidTerrainProvider(),   // token-free
+      imageryProvider: false,                                   // we'll add our own
+      baseLayerPicker:false, geocoder:false, homeButton:false, timeline:false, animation:false
     });
 
-    // 2D Map
-    const map2d = L.map('map2d').setView([0, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map2d);
+    // remove the "?" navigation help button
+    if (viewer.navigationHelpButton) viewer.navigationHelpButton.destroy();
 
-    const marker2d = L.marker([0, 0], { icon: issIcon }).addTo(map2d);
+    // High-res imagery (Esri World Imagery) + borders/labels overlay
+    viewer.imageryLayers.removeAll();
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Esri World Imagery'
+    }));
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Esri Boundaries & Places'
+    }));
 
-    // 3D Globe
-    window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/';
-    const viewer = new Cesium.Viewer('map3d', {
-      terrainProvider: Cesium.createWorldTerrain(),
-      imageryProvider: new Cesium.IonImageryProvider({ assetId: 3 }),
-      baseLayerPicker: false,
-      geocoder: false
+    // visuals + perf
+    viewer.scene.globe.enableLighting = false;
+    viewer.scene.skyAtmosphere = new Cesium.SkyAtmosphere();
+    viewer.scene.requestRenderMode = true;
+    viewer.resolutionScale = Math.min(1, window.devicePixelRatio);
+
+    const issBillboard = viewer.entities.add({
+      name:'ISS',
+      position: Cesium.Cartesian3.fromDegrees(0,0, 420000),
+      billboard:{ image:'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg', width:36, height:36 }
     });
-    const issEntity = viewer.entities.add({
-      name: "ISS",
-      position: Cesium.Cartesian3.fromDegrees(0, 0, 420000),
-      billboard: {
-        image: 'https://upload.wikimedia.org/wikipedia/commons/d/d0/International_Space_Station.svg',
-        width: 50,
-        height: 50
-      }
-    });
+    let trail3d = null;
 
-    // UI elements
-    const coordsEl = document.getElementById('coords');
-    const altEl = document.getElementById('alt');
-    const speedEl = document.getElementById('speed');
+    // ---------- UI + data ----------
+    const coordsEl=document.getElementById('coords');
+    const altEl=document.getElementById('alt');
+    const speedEl=document.getElementById('speed');
+    const btn2d=document.getElementById('btn2d');
+    const btn3d=document.getElementById('btn3d');
+    const followBtn=document.getElementById('followBtn');
+    const centerBtn=document.getElementById('centerBtn');
+    const statusEl=document.getElementById('status');
+    const div2d=document.getElementById('map2d');
+    const div3d=document.getElementById('map3d');
 
-    async function updateISS() {
-      try {
-        const res = await fetch('/api/iss');
-        const data = await res.json();
+    let firstCenter=true;
+    let autoFollow=true;
+    const trail=[]; const TRAIL_MAX=200;
 
-        const latitude = parseFloat(data.latitude).toFixed(2);
-        const longitude = parseFloat(data.longitude).toFixed(2);
-
-        coordsEl.textContent = `Lat: ${latitude}, Lon: ${longitude}`;
-        altEl.textContent = `Altitude: ${data.altitude_mi} mi`;
-        speedEl.textContent = `Speed: ${data.speed_mph} mph`;
-
-        // 2D update
-        marker2d.setLatLng([latitude, longitude]);
-
-        // 3D update
-        issEntity.position = Cesium.Cartesian3.fromDegrees(longitude, latitude, data.altitude_mi * 1609.34);
-      } catch (err) {
-        console.error('Error updating ISS:', err);
-      }
+    function setFollowUI(){
+      followBtn.textContent = `Auto-Follow: ${autoFollow ? 'On' : 'Off'}`;
+      statusEl.textContent = autoFollow ? '' : 'Auto-Follow paused (drag to move, click Center to re-enable).';
     }
 
-    setInterval(updateISS, 5000);
-    updateISS();
+    function center2D(lat,lon){
+      map2d.setView([lat,lon], Math.max(map2d.getZoom(), 3), { animate:true });
+    }
+    function center3D(lat,lon,altM){
+      const height = Math.max(altM*8, 900000);
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon,lat,height),
+        duration:1.1
+      });
+    }
 
-    // Toggle logic
-    document.getElementById('btn2d').addEventListener('click', () => {
-      document.getElementById('map2d').classList.add('active');
-      document.getElementById('map3d').classList.remove('active');
+    // normalize API shapes
+    function parseIssData(d){
+      let lat, lon, altMi=null, speedMph=null;
+      if (d && typeof d.latitude !== 'undefined') {
+        lat = parseFloat(d.latitude); lon = parseFloat(d.longitude);
+        altMi = d.altitude_mi ?? null; speedMph = d.speed_mph ?? null;
+      } else if (d && d.position) {
+        lat = parseFloat(d.position.latitude); lon = parseFloat(d.position.longitude);
+      }
+      return {lat, lon, altMi, speedMph};
+    }
+
+    async function updateISS(){
+      try{
+        const r = await fetch('/api/iss', { cache:'no-store' });
+        const raw = await r.json();
+        const {lat, lon, altMi, speedMph} = parseIssData(raw);
+        if (isNaN(lat) || isNaN(lon)) return;
+
+        const altM = (altMi ?? 250) * 1609.34;
+
+        coordsEl.textContent = `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`;
+        altEl.textContent = `Altitude: ${altMi ? altMi : '—'} mi`;
+        speedEl.textContent = `Speed: ${speedMph ? speedMph : '—'} mph`;
+
+        // 2D
+        marker2d.setLatLng([lat,lon]);
+        trail.push([lon,lat,altM]);
+        if(trail.length>TRAIL_MAX) trail.shift();
+        trail2d.setLatLngs(trail.map(p => [p[1],p[0]]));
+
+        // follow
+        if(firstCenter){ center2D(lat,lon); center3D(lat,lon,altM); firstCenter=false; }
+        else if(autoFollow){
+          if(div2d.classList.contains('active')) center2D(lat,lon);
+          if(div3d.classList.contains('active')) center3D(lat,lon,altM);
+        }
+
+        // 3D
+        issBillboard.position = Cesium.Cartesian3.fromDegrees(lon,lat,altM);
+        const flat = trail.flatMap(p => [p[0],p[1],p[2]]);
+        if(!trail3d && trail.length>=2){
+          trail3d = viewer.entities.add({
+            polyline:{
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+              width:2,
+              material: new Cesium.PolylineGlowMaterialProperty({ glowPower:0.2, color: Cesium.Color.ORANGE })
+            }
+          });
+        } else if(trail3d){
+          trail3d.polyline.positions = Cesium.Cartesian3.fromDegreesArrayHeights(flat);
+        }
+      }catch(e){ console.error('ISS update failed', e); }
+    }
+    updateISS();
+    setInterval(updateISS, 7000);
+
+    // Toggles
+    btn2d.addEventListener('click', ()=>{ div2d.classList.add('active'); div3d.classList.remove('active'); setTimeout(()=>map2d.invalidateSize(),100); });
+    btn3d.addEventListener('click', ()=>{ div3d.classList.add('active'); div2d.classList.remove('active'); viewer.resize(); });
+
+    // Auto-follow + interactions
+    followBtn.addEventListener('click', ()=>{ autoFollow=!autoFollow; setFollowUI(); });
+    map2d.on('dragstart', ()=>{ autoFollow=false; setFollowUI(); });
+    viewer.canvas.addEventListener('mousedown', ()=>{ autoFollow=false; setFollowUI(); });
+    viewer.canvas.addEventListener('touchstart', ()=>{ autoFollow=false; setFollowUI(); });
+
+    // Center button (also re-enables follow)
+    centerBtn.addEventListener('click', ()=>{
+      autoFollow=true; setFollowUI();
+      if(div2d.classList.contains('active')){
+        const p = marker2d.getLatLng(); center2D(p.lat, p.lng);
+      }else if(trail.length){
+        const [lon,lat,altM] = trail[trail.length-1];
+        center3D(lat,lon,altM);
+      }
     });
-    document.getElementById('btn3d').addEventListener('click', () => {
-      document.getElementById('map3d').classList.add('active');
-      document.getElementById('map2d').classList.remove('active');
-      viewer.resize();
+
+    setFollowUI();
+  </script>
+</body>
+</html>
